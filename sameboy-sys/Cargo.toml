@@ -2,6 +2,7 @@
 name = "sameboy-sys"
 version = "0.1.0"
 edition = "2021"
+description = "Unsafe bindings for SameBoy, a free and accurate Game Boy emulator"
 
 [build-dependencies]
 bindgen = "0.69.4"

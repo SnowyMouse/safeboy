@@ -1,7 +1,6 @@
-use std::any::Any;
 use sameboy_sys::*;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(u32)]
 pub enum Model {
     DMGB = GB_model_t_GB_MODEL_DMG_B as u32,
@@ -26,7 +25,7 @@ pub enum Model {
     GBPA = GB_model_t_GB_MODEL_GBP_A as u32,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(u32)]
 pub enum AudioChannel {
     Square1 = GB_channel_t_GB_SQUARE_1 as u32,
@@ -35,7 +34,7 @@ pub enum AudioChannel {
     Noise = GB_channel_t_GB_NOISE as u32,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(u32)]
 pub enum ColorCorrectionMode {
     Disabled = GB_color_correction_mode_t_GB_COLOR_CORRECTION_DISABLED as u32,
@@ -47,7 +46,7 @@ pub enum ColorCorrectionMode {
     ModernAccurate = GB_color_correction_mode_t_GB_COLOR_CORRECTION_MODERN_ACCURATE as u32,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(u32)]
 pub enum HighpassFilterMode {
     /// Do not apply any filter, keep DC offset
@@ -62,7 +61,7 @@ pub enum HighpassFilterMode {
     Max = GB_highpass_mode_t_GB_HIGHPASS_MAX as u32
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(u32)]
 pub enum SGBBorderMode {
     SGB = GB_border_mode_t_GB_BORDER_SGB as u32,
@@ -70,7 +69,7 @@ pub enum SGBBorderMode {
     Always = GB_border_mode_t_GB_BORDER_ALWAYS as u32,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(u8)]
 pub enum Key {
     Right = GB_key_t_GB_KEY_RIGHT as u8,
@@ -83,7 +82,7 @@ pub enum Key {
     Start = GB_key_t_GB_KEY_START as u8,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(u8)]
 pub enum KeyMaskBit {
     Right = GB_key_mask_t_GB_KEY_RIGHT_MASK as u8,
@@ -96,7 +95,7 @@ pub enum KeyMaskBit {
     Start = GB_key_mask_t_GB_KEY_START_MASK as u8,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(u32)]
 pub enum Rumble {
     Disabled = GB_rumble_mode_t_GB_RUMBLE_DISABLED as u32,
@@ -104,7 +103,7 @@ pub enum Rumble {
     AllGames = GB_rumble_mode_t_GB_RUMBLE_ALL_GAMES as u32
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(u32)]
 pub enum RTCMode {
     SyncToHost = GB_rtc_mode_t_GB_RTC_MODE_SYNC_TO_HOST as u32,
@@ -121,7 +120,7 @@ pub struct Registers {
     pub pc: u16
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(u32)]
 pub enum Accessory {
     None = GB_accessory_t_GB_ACCESSORY_NONE as u32,
@@ -143,7 +142,7 @@ impl From<GB_registers_t> for Registers {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(u32)]
 pub enum DirectAccess {
     ROM = GB_direct_access_t_GB_DIRECT_ACCESS_ROM as u32,
@@ -174,7 +173,7 @@ pub struct PrinterPage {
     pub exposure: u8
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(u32)]
 pub enum VBlankType {
     /// An actual Vblank-triggered frame
@@ -201,8 +200,6 @@ impl From<GB_vblank_type_t> for VBlankType {
         }
     }
 }
-
-pub type UserData = Box<dyn Any>;
 
 pub type Palette = [PaletteColor; 5];
 

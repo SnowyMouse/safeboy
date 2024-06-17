@@ -44,8 +44,13 @@ impl Gameboy {
     }
 
     /// Sets the data which will be passed to all callbacks
-    pub fn set_user_data(&mut self, data: UserData) {
-        self.inner.user_data = Some(data)
+    pub fn set_user_data(&mut self, data: Option<Box<dyn Any>>) {
+        self.inner.user_data = data
+    }
+
+    /// Get the user data, if any
+    pub fn get_user_data(&mut self) -> Option<&mut dyn Any> {
+        self.inner.user_data.as_mut().map(|b| b.as_mut())
     }
 
     /// Set the model to `model` and reset the emulator.
@@ -404,7 +409,7 @@ impl Gameboy {
         data
     }
 
-    pub fn set_apu_sample_callback(&mut self, callback: fn(&mut dyn Any, left: i16, right: i16)) {
+    pub fn set_apu_sample_callback(&mut self, callback: fn(callback: Option<&mut dyn Any>, left: i16, right: i16)) {
         self.inner.apu_sample_callback = callback;
     }
 
@@ -551,7 +556,7 @@ impl Gameboy {
         unsafe { GB_set_rumble_mode(self.inner.gb, mode as GB_rumble_mode_t) }
     }
 
-    pub fn set_rumble_callback(&mut self, callback: fn(&mut dyn Any, rumble_amplitude: f64)) {
+    pub fn set_rumble_callback(&mut self, callback: fn(callback: Option<&mut dyn Any>, rumble_amplitude: f64)) {
         self.inner.rumble_callback = callback
     }
 
@@ -571,15 +576,15 @@ impl Gameboy {
         unsafe { GB_write_memory(self.inner.gb, addr, value) }
     }
 
-    pub fn set_rgb_encode_callback(&mut self, callback: Option<fn(&mut dyn Any, red: u8, green: u8, blue: u8) -> u32>) {
+    pub fn set_rgb_encode_callback(&mut self, callback: Option<fn(callback: Option<&mut dyn Any>, red: u8, green: u8, blue: u8) -> u32>) {
         self.inner.rgb_encode_callback = callback.unwrap_or(default_rgb_encode_callback);
     }
 
-    pub fn set_vblank_callback(&mut self, callback: Option<fn(&mut dyn Any, vblank_type: VBlankType)>) {
+    pub fn set_vblank_callback(&mut self, callback: Option<fn(callback: Option<&mut dyn Any>, vblank_type: VBlankType)>) {
         self.inner.vblank_callback = callback.unwrap_or(default_vblank_callback);
     }
 
-    pub fn set_read_memory_callback(&mut self, callback: Option<fn(&mut dyn Any, addr: u16, data: u8) -> u8>) {
+    pub fn set_read_memory_callback(&mut self, callback: Option<fn(callback: Option<&mut dyn Any>, addr: u16, data: u8) -> u8>) {
         if let Some(callback) = callback {
             self.inner.read_memory_callback = callback;
             unsafe { GB_set_read_memory_callback(self.inner.gb, Some(GameboyStateInner::read_memory_callback)); }
@@ -590,7 +595,7 @@ impl Gameboy {
         }
     }
 
-    pub fn set_write_memory_callback(&mut self, callback: Option<fn(&mut dyn Any, addr: u16, data: u8) -> bool>) {
+    pub fn set_write_memory_callback(&mut self, callback: Option<fn(callback: Option<&mut dyn Any>, addr: u16, data: u8) -> bool>) {
         if let Some(callback) = callback {
             self.inner.write_memory_callback = callback;
             unsafe { GB_set_write_memory_callback(self.inner.gb, Some(GameboyStateInner::write_memory_callback)); }
@@ -748,14 +753,14 @@ struct GameboyStateInner {
     gb: *mut GB_gameboy_t,
     pixel_buffer: Vec<u32>,
     rendering_disabled: bool,
-    rgb_encode_callback: fn(user_data: &mut dyn Any, red: u8, green: u8, blue: u8) -> u32,
-    apu_sample_callback: fn(user_data: &mut dyn Any, left: i16, right: i16),
-    vblank_callback: fn(user_data: &mut dyn Any, vblank_type: VBlankType),
-    rumble_callback: fn(user_data: &mut dyn Any, rumble_amplitude: f64),
-    read_memory_callback: fn(user_data: &mut dyn Any, addr: u16, data: u8) -> u8,
-    write_memory_callback: fn(user_data: &mut dyn Any, addr: u16, data: u8) -> bool,
+    rgb_encode_callback: fn(user_data: Option<&mut dyn Any>, red: u8, green: u8, blue: u8) -> u32,
+    apu_sample_callback: fn(user_data: Option<&mut dyn Any>, left: i16, right: i16),
+    vblank_callback: fn(user_data: Option<&mut dyn Any>, vblank_type: VBlankType),
+    rumble_callback: fn(user_data: Option<&mut dyn Any>, rumble_amplitude: f64),
+    read_memory_callback: fn(user_data: Option<&mut dyn Any>, addr: u16, data: u8) -> u8,
+    write_memory_callback: fn(user_data: Option<&mut dyn Any>, addr: u16, data: u8) -> bool,
     pages: Vec<PrinterPage>,
-    user_data: Option<UserData>,
+    user_data: Option<Box<dyn Any>>,
     _phantom_pinned: PhantomPinned,
 }
 
@@ -824,8 +829,8 @@ impl GameboyStateInner {
         })
     }
 
-    fn get_user_data(&mut self) -> &mut dyn Any {
-        self.user_data.as_mut().map(|b| b.as_mut()).unwrap_or(&mut [0;0])
+    fn get_user_data(&mut self) -> Option<&mut dyn Any> {
+        self.user_data.as_mut().map(|m| m.as_mut())
     }
 
     /// Catch an unwinding panic, and abort if this occurs.
@@ -888,16 +893,16 @@ impl Drop for Gameboy {
 }
 
 
-fn default_rgb_encode_callback(_: &mut dyn Any, r: u8, g: u8, b: u8) -> u32 {
+fn default_rgb_encode_callback(_: Option<&mut dyn Any>, r: u8, g: u8, b: u8) -> u32 {
     0xFF000000 | (( r as u32 ) << 16) | (( g as u32 ) << 8) | ( b as u32 )
 }
 
-fn default_apu_sample_callback(_: &mut dyn Any, _: i16, _: i16) {}
+fn default_apu_sample_callback(_: Option<&mut dyn Any>, _: i16, _: i16) {}
 
-fn default_rumble_callback(_: &mut dyn Any, _: f64) {}
+fn default_rumble_callback(_: Option<&mut dyn Any>, _: f64) {}
 
-fn default_vblank_callback(_: &mut dyn Any, _: VBlankType) {}
+fn default_vblank_callback(_: Option<&mut dyn Any>, _: VBlankType) {}
 
-fn default_read_memory_callback(_: &mut dyn Any, _: u16, data: u8) -> u8 { data }
+fn default_read_memory_callback(_: Option<&mut dyn Any>, _: u16, data: u8) -> u8 { data }
 
-fn default_write_memory_callback(_: &mut dyn Any, _: u16, _: u8) -> bool { true }
+fn default_write_memory_callback(_: Option<&mut dyn Any>, _: u16, _: u8) -> bool { true }
