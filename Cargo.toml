@@ -1,0 +1,3 @@
+[workspace]
+members = ["safeboy", "sameboy-sys"]
+resolver = "2"
