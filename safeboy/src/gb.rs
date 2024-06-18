@@ -226,7 +226,7 @@ impl Gameboy {
         unsafe { GB_get_player_count(self.inner.gb) }
     }
 
-    pub fn get_registers(&mut self) -> Registers {
+    pub fn get_registers(&self) -> Registers {
         unsafe {
             let registers = GB_get_registers(self.inner.gb);
             (*registers).into()
@@ -538,6 +538,10 @@ impl Gameboy {
         unsafe { GB_set_rendering_disabled(self.inner.gb, disabled) };
         self.inner.rendering_disabled = disabled;
         self.inner.reset_pixel_buffer();
+    }
+
+    pub fn get_pixel_buffer(&self) -> &[u32] {
+        self.inner.pixel_buffer.as_slice()
     }
 
     pub fn set_rewind_length(&mut self, seconds: f64) {
