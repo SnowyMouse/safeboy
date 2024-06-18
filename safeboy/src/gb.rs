@@ -393,7 +393,7 @@ impl Gameboy {
     }
 
     pub fn read_save_state_to_buffer(&self, data: &mut [u8]) {
-        assert_eq!(data.len(), self.get_sram_size());
+        assert_eq!(data.len(), self.get_save_state_size());
         unsafe {
             GB_save_state_to_buffer(self.inner.gb, data.as_mut_ptr());
         }
