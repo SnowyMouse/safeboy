@@ -43,6 +43,21 @@ impl Gameboy {
         }
     }
 
+    /// Get the model to use for the given save state.
+    ///
+    /// Returns `Err` if the save state is invalid or a model couldn't be determined.
+    pub fn model_for_save_state(save_state: &[u8]) -> Result<Model, ()> {
+        let mut model = 0 as GB_model_t;
+        let is_ok = unsafe { GB_get_state_model_from_buffer(save_state.as_ptr(), save_state.len(), &mut model) };
+
+        if is_ok != 0 {
+            Err(())
+        }
+        else {
+            (model as u32).try_into()
+        }
+    }
+
     /// Sets the data which will be passed to all callbacks
     pub fn set_user_data(&mut self, data: Option<Box<dyn Any>>) {
         self.inner.user_data = data

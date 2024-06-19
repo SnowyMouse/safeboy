@@ -25,6 +25,32 @@ pub enum Model {
     GBPA = GB_model_t_GB_MODEL_GBP_A as u32,
 }
 
+impl TryFrom<u32> for Model {
+    type Error = ();
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            n if n == Self::DMGB as u32 => { Ok(Self::DMGB) },
+            n if n == Self::SGBNTSC as u32 => { Ok(Self::SGBNTSC) },
+            n if n == Self::SGBPAL as u32 => { Ok(Self::SGBPAL) },
+            n if n == Self::SGBNTSCNoSFC as u32 => { Ok(Self::SGBNTSCNoSFC) },
+            n if n == Self::SGBPALNoSFC as u32 => { Ok(Self::SGBPALNoSFC) },
+            n if n == Self::SGB2 as u32 => { Ok(Self::SGB2) },
+            n if n == Self::SGB2NoSFC as u32 => { Ok(Self::SGB2NoSFC) },
+            n if n == Self::MGB as u32 => { Ok(Self::MGB) },
+            n if n == Self::CGB0 as u32 => { Ok(Self::CGB0) },
+            n if n == Self::CGBA as u32 => { Ok(Self::CGBA) },
+            n if n == Self::CGBB as u32 => { Ok(Self::CGBB) },
+            n if n == Self::CGBC as u32 => { Ok(Self::CGBC) },
+            n if n == Self::CGBD as u32 => { Ok(Self::CGBD) },
+            n if n == Self::CGBE as u32 => { Ok(Self::CGBE) },
+            n if n == Self::AGBA as u32 => { Ok(Self::AGBA) },
+            n if n == Self::GBPA as u32 => { Ok(Self::GBPA) },
+            _ => Err(())
+        }
+    }
+}
+
 #[derive(Copy, Clone, PartialEq)]
 #[repr(u32)]
 pub enum AudioChannel {
