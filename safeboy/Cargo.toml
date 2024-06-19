@@ -2,9 +2,10 @@
 name = "safeboy"
 version = "0.1.0"
 edition = "2021"
-license = "GPL-3"
+rust-version = "1.78.0"
+license = "GPL-3.0-only"
 description = "Safe bindings for SameBoy, a free and accurate Game Boy emulator"
 repository = "https://github.com/SnowyMouse/safeboy"
 
 [dependencies]
-sameboy-sys = { path = "../sameboy-sys" }
+sameboy-sys = { path = "../sameboy-sys", version = "0.1.0" }
