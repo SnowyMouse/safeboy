@@ -4,6 +4,10 @@
 extern "C" {
 #endif
 
+#ifdef _WIN32
+#define getline(...) -1 // Hack because getline isn't available for cross compiling always
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdalign.h>

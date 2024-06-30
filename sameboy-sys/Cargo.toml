@@ -8,3 +8,4 @@ description = "Unsafe bindings for SameBoy, a free and accurate Game Boy emulato
 
 [build-dependencies]
 bindgen = "0.69.4"
+cmake = "0.1.50"

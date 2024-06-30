@@ -8,6 +8,8 @@
 #ifndef _WIN32
 #include <sys/select.h>
 #include <unistd.h>
+#else
+#define vasprintf(...) NULL // Hack because vasprintf isn't available for cross compiling always
 #endif
 #include "random.h"
 #include "gb.h"
