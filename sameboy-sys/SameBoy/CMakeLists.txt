@@ -31,4 +31,4 @@ file(READ "version.mk" GB_VERSION_FILE)
 string(REPLACE "VERSION := " "" GB_VERSION_DATA "${GB_VERSION_FILE}")
 target_compile_definitions(sameboy PUBLIC GB_INTERNAL GB_VERSION="${GB_VERSION_DATA}")
 
-install(TARGETS sameboy)
+install(TARGETS sameboy DESTINATION ".")

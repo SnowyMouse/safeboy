@@ -267,14 +267,14 @@ dependencies = [
 
 [[package]]
 name = "safeboy"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "sameboy-sys",
 ]
 
 [[package]]
 name = "sameboy-sys"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "bindgen",
  "cmake",

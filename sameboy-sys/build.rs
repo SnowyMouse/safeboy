@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 fn main() {
     let sameboy: PathBuf = cmake::build(Path::new("SameBoy"));
 
+    println!("cargo:rustc-link-search={}", sameboy.display());
+    println!("cargo:rustc-link-lib=sameboy");
+
     let core = PathBuf::from("SameBoy/Core")
         .canonicalize()
         .expect("should have a Core dir in SameBoy");
-
-    println!("cargo:rustc-link-search={}", sameboy.display());
-    println!("cargo:rustc-link-lib=sameboy");
 
     // If you encounter issues with stuff like time.h not being found, you might need
     // to use BINDGEN_EXTRA_CLANG_ARGS='--sysroot <path/to/sysroot>'
