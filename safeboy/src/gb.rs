@@ -371,6 +371,9 @@ impl Gameboy {
         unsafe { GB_run(self.inner.gb) as u64 }
     }
 
+    /// Run for one frame.
+    ///
+    /// Returns the number of nanoseconds passed since the last frame.
     pub fn run_frame(&mut self) -> u64 {
         unsafe { GB_run_frame(self.inner.gb) }
     }
@@ -925,3 +928,6 @@ fn default_vblank_callback(_: Option<&mut dyn Any>, _: VBlankType) {}
 fn default_read_memory_callback(_: Option<&mut dyn Any>, _: u16, data: u8) -> u8 { data }
 
 fn default_write_memory_callback(_: Option<&mut dyn Any>, _: u16, _: u8) -> bool { true }
+
+unsafe impl Send for GameboyStateInner {}
+unsafe impl Sync for GameboyStateInner {}
