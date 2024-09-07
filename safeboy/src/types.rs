@@ -183,7 +183,7 @@ pub enum DirectAccess {
     OAM = GB_direct_access_t_GB_DIRECT_ACCESS_OAM as u32,
     BGP = GB_direct_access_t_GB_DIRECT_ACCESS_BGP as u32,
     OBP = GB_direct_access_t_GB_DIRECT_ACCESS_OBP as u32,
-    InternetExplorer = GB_direct_access_t_GB_DIRECT_ACCESS_IE as u32,
+    IE = GB_direct_access_t_GB_DIRECT_ACCESS_IE as u32,
 
     /// Identical to ROM, but returns the correct rom0 bank in the bank output argument
     ROM0 = GB_direct_access_t_GB_DIRECT_ACCESS_ROM0 as u32,
