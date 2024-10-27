@@ -2,7 +2,6 @@ use std::any::Any;
 use std::ffi::{c_char, CStr};
 use std::mem::transmute;
 use sameboy_sys::*;
-use crate::Gameboy;
 
 #[derive(Copy, Clone, PartialEq)]
 #[repr(u32)]
