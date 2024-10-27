@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::ffi::{c_char, CStr};
 use std::mem::transmute;
 use sameboy_sys::*;
@@ -329,3 +330,6 @@ pub struct EnabledEvents {
     /// Record all memory writes.
     pub memory_write: bool,
 }
+
+pub type WriteMemoryCallback = fn(user_data: Option<&mut dyn Any>, address: u16, data: u8) -> bool;
+pub type ReadMemoryCallback = fn(user_data: Option<&mut dyn Any>, address: u16, data: u8) -> u8;

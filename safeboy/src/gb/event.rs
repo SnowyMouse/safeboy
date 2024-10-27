@@ -6,7 +6,7 @@ pub enum Event {
     VBlank { vblank_type: VBlankType },
     PrintedPage { page: PrinterPage },
     MemoryRead { address: u16, original_data: u8, final_data: u8 },
-    MemoryWrite { address: u16, data: u8, prevented_by_callback: bool },
+    MemoryWrite { address: u16, data: u8, allow: bool },
 }
 
 pub(crate) mod inner {
@@ -84,9 +84,12 @@ pub(crate) mod inner {
     pub extern "C" fn printer_done_callback(_: *mut GB_gameboy_t) {}
 
     pub unsafe extern "C" fn read_memory_callback(gb: *mut GB_gameboy_t, address: u16, original_data: u8) -> u8 {
-        let user_data = get_instance(gb).get_user_data();
-
-        let final_data = (get_instance(gb).read_memory_callback)(user_data, address, original_data);
+        let final_data = if let Some(callback) = get_instance(gb).read_memory_callback {
+            callback(get_instance(gb).get_user_data(), address, original_data)
+        }
+        else {
+            original_data
+        };
 
         if get_instance(gb).enabled_events.memory_read {
             get_instance(gb).events.push(Event::MemoryRead { address, original_data, final_data })
@@ -96,12 +99,15 @@ pub(crate) mod inner {
     }
 
     pub unsafe extern "C" fn write_memory_callback(gb: *mut GB_gameboy_t, address: u16, data: u8) -> bool {
-        let user_data = get_instance(gb).get_user_data();
-
-        let allow = (get_instance(gb).write_memory_callback)(user_data, address, data);
+        let allow = if let Some(callback) = get_instance(gb).write_memory_callback {
+            callback(get_instance(gb).get_user_data(), address, data)
+        }
+        else {
+            true
+        };
 
         if get_instance(gb).enabled_events.memory_write {
-            get_instance(gb).events.push(Event::MemoryWrite { address, data, prevented_by_callback: !allow })
+            get_instance(gb).events.push(Event::MemoryWrite { address, data, allow })
         }
 
         allow

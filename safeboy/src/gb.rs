@@ -24,8 +24,8 @@ impl Gameboy {
                 rgb_encoding,
                 enabled_events,
                 events: Vec::with_capacity(1024),
-                read_memory_callback: |_,_,data| data,
-                write_memory_callback: |_,_,_| true,
+                read_memory_callback: None,
+                write_memory_callback: None,
                 running: false,
                 _phantom_pinned: Default::default()
             });
@@ -798,14 +798,14 @@ impl Gameboy {
     /// Run the callback when memory is being read.
     ///
     /// Unlike with `track_memory_reads`, you can intercept the read and even change it by returning a different byte.
-    pub fn set_memory_read_callback(&mut self, callback: fn(user_data: Option<&mut dyn Any>, address: u16, data: u8) -> u8) {
+    pub fn set_read_memory_callback(&mut self, callback: Option<ReadMemoryCallback>) {
         self.inner.read_memory_callback = callback;
     }
 
     /// Run the callback when memory is being written.
     ///
     /// Unlike with `track_memory_writes`, you can intercept the write and even prevent it by returning `false`.
-    pub fn set_memory_write_callback(&mut self, callback: fn(gameboy: Option<&mut dyn Any>, address: u16, data: u8) -> bool) {
+    pub fn set_write_memory_callback(&mut self, callback: Option<WriteMemoryCallback>) {
         self.inner.write_memory_callback = callback;
     }
 
@@ -965,8 +965,8 @@ struct GameboyStateInner {
     rgb_encoding: RgbEncoding,
     events: Vec<Event>,
     enabled_events: EnabledEvents,
-    read_memory_callback: fn(user_data: Option<&mut dyn Any>, address: u16, data: u8) -> u8,
-    write_memory_callback: fn(user_data: Option<&mut dyn Any>, address: u16, data: u8) -> bool,
+    read_memory_callback: Option<ReadMemoryCallback>,
+    write_memory_callback: Option<WriteMemoryCallback>,
     running: bool,
     _phantom_pinned: PhantomPinned,
 }
