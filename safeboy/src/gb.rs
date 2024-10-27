@@ -13,7 +13,7 @@ pub struct Gameboy {
 }
 
 impl Gameboy {
-    pub fn new(model: Model, rgb_encoding: RgbEncoding) -> Self {
+    pub fn new(model: Model, rgb_encoding: RgbEncoding, enabled_events: EnabledEvents) -> Self {
         unsafe {
             let gb = GB_alloc();
             let mut inner = Box::new(GameboyStateInner {
@@ -22,11 +22,10 @@ impl Gameboy {
                 rendering_disabled: false,
                 user_data: None,
                 rgb_encoding,
+                enabled_events,
                 events: Vec::with_capacity(1024),
                 read_memory_callback: |_,_,data| data,
                 write_memory_callback: |_,_,_| true,
-                track_writes: false,
-                track_reads: false,
                 running: false,
                 _phantom_pinned: Default::default()
             });
@@ -51,6 +50,16 @@ impl Gameboy {
     /// Iterate through all events thus far.
     pub fn iter_events<'a>(&'a mut self) -> impl Iterator<Item = Event> + 'a {
         self.inner.events.drain(..)
+    }
+
+    /// Get all enabled events.
+    pub fn get_enabled_events(&self) -> EnabledEvents {
+        self.inner.enabled_events
+    }
+
+    /// Set all enabled events.
+    pub fn set_enabled_events(&mut self, enabled_events: EnabledEvents) {
+        self.inner.enabled_events = enabled_events;
     }
 
     /// Get the model to use for the given save state.
@@ -84,6 +93,7 @@ impl Gameboy {
     ///
     /// Panics if `self.is_running()`
     pub fn switch_model_and_reset(&mut self, model: Model) {
+        self.assert_not_running();
         unsafe { GB_switch_model_and_reset(self.inner.gb, model as GB_model_t) };
         self.inner.reset_pixel_buffer();
     }
@@ -115,10 +125,15 @@ impl Gameboy {
 
     /// Connect an emulated printer.
     ///
-    /// You can get all pages with [get_pages](Self::get_pages).
-    ///
     /// Disable with [disconnect_serial](Self::disconnect_serial).
+    ///
+    /// While enabled, printer events will be sent if EnabledEvents::printer is set.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
     pub fn connect_printer(&mut self) {
+        self.assert_not_running();
         unsafe { GB_connect_printer(self.inner.gb, Some(printer_callback), Some(printer_done_callback)) }
     }
 
@@ -742,21 +757,21 @@ impl Gameboy {
 
     /// Set the rumble mode.
     ///
-    /// Rumble events will be sent to Events if enabled.
+    /// Rumble events will be sent to Events if enabled and EnabledEvents::rumble is set.
     pub fn set_rumble_mode(&mut self, mode: Rumble) {
         unsafe { GB_set_rumble_mode(self.inner.gb, mode as GB_rumble_mode_t) }
     }
 
     /// Set the audio sample rate.
     ///
-    /// Audio events will be sent to Events if non-zero.
+    /// Audio events will be sent to Events if non-zero and EnabledEvents::sample is set.
     pub fn set_sample_rate(&mut self, sample_rate: u32) {
         unsafe { GB_set_sample_rate(self.inner.gb, sample_rate as c_uint) }
     }
 
     /// Set the audio sample rate based on clock rate.
     ///
-    /// Audio events will be sent to Events if non-zero.
+    /// Audio events will be sent to Events if non-zero and EnabledEvents::sample is set.
     pub fn set_sample_rate_by_clocks(&mut self, clocks_per_sample: f64) {
         unsafe { GB_set_sample_rate_by_clocks(self.inner.gb, clocks_per_sample) }
     }
@@ -778,16 +793,6 @@ impl Gameboy {
     pub fn write_memory(&mut self, addr: u16, value: u8) {
         self.assert_not_running();
         unsafe { GB_write_memory(self.inner.gb, addr, value) }
-    }
-
-    /// Track memory reads in events.
-    pub fn track_memory_reads_in_events(&mut self, tracked: bool) {
-        self.inner.track_reads = tracked;
-    }
-
-    /// Track memory writes in events.
-    pub fn track_memory_writes_in_events(&mut self, tracked: bool) {
-        self.inner.track_writes = tracked;
     }
 
     /// Run the callback when memory is being read.
@@ -952,13 +957,6 @@ impl Gameboy {
     }
 }
 
-pub enum RgbEncoding {
-    B8G8R8X8,
-    R8G8B8X8,
-    X8R8G8B8,
-    X8B8G8R8,
-}
-
 struct GameboyStateInner {
     gb: *mut GB_gameboy_t,
     pixel_buffer: Vec<u32>,
@@ -966,9 +964,8 @@ struct GameboyStateInner {
     user_data: Option<Box<dyn Any>>,
     rgb_encoding: RgbEncoding,
     events: Vec<Event>,
-    track_reads: bool,
+    enabled_events: EnabledEvents,
     read_memory_callback: fn(user_data: Option<&mut dyn Any>, address: u16, data: u8) -> u8,
-    track_writes: bool,
     write_memory_callback: fn(user_data: Option<&mut dyn Any>, address: u16, data: u8) -> bool,
     running: bool,
     _phantom_pinned: PhantomPinned,

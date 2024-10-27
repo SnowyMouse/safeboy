@@ -25,15 +25,24 @@ pub(crate) mod inner {
     }
 
     pub unsafe extern "C" fn sample_callback(gb: *mut GB_gameboy_t, sample: *mut GB_sample_t) {
-        get_instance(gb).events.push(Event::Sample { left: (*sample).left, right: (*sample).right })
+        let instance = get_instance(gb);
+        if instance.enabled_events.sample {
+            get_instance(gb).events.push(Event::Sample { left: (*sample).left, right: (*sample).right })
+        }
     }
 
     pub unsafe extern "C" fn rumble_callback(gb: *mut GB_gameboy_t, amplitude: f64) {
-        get_instance(gb).events.push(Event::Rumble { amplitude })
+        let instance = get_instance(gb);
+        if instance.enabled_events.rumble {
+            instance.events.push(Event::Rumble { amplitude })
+        }
     }
 
     pub unsafe extern "C" fn vblank_callback(gb: *mut GB_gameboy_t, vblank: GB_vblank_type_t) {
-        get_instance(gb).events.push(Event::VBlank { vblank_type: vblank.into() })
+        let instance = get_instance(gb);
+        if instance.enabled_events.vblank {
+            instance.events.push(Event::VBlank { vblank_type: vblank.into() })
+        }
     }
 
     pub unsafe extern "C" fn printer_callback(
@@ -44,6 +53,11 @@ pub(crate) mod inner {
         bottom_margin: u8,
         exposure: u8
     ) {
+        let instance = get_instance(gb);
+        if !instance.enabled_events.printer {
+            return
+        }
+
         let height = height as usize;
         let top_margin = top_margin as usize;
         let bottom_margin = bottom_margin as usize;
@@ -64,7 +78,7 @@ pub(crate) mod inner {
             exposure
         };
 
-        get_instance(gb).events.push(Event::PrintedPage { page })
+        instance.events.push(Event::PrintedPage { page })
     }
 
     pub extern "C" fn printer_done_callback(_: *mut GB_gameboy_t) {}
@@ -74,7 +88,7 @@ pub(crate) mod inner {
 
         let final_data = (get_instance(gb).read_memory_callback)(user_data, address, original_data);
 
-        if get_instance(gb).track_reads {
+        if get_instance(gb).enabled_events.memory_read {
             get_instance(gb).events.push(Event::MemoryRead { address, original_data, final_data })
         }
 
@@ -86,7 +100,7 @@ pub(crate) mod inner {
 
         let allow = (get_instance(gb).write_memory_callback)(user_data, address, data);
 
-        if get_instance(gb).track_writes {
+        if get_instance(gb).enabled_events.memory_write {
             get_instance(gb).events.push(Event::MemoryWrite { address, data, prevented_by_callback: !allow })
         }
 

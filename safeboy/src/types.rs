@@ -1,6 +1,7 @@
 use std::ffi::{c_char, CStr};
 use std::mem::transmute;
 use sameboy_sys::*;
+use crate::Gameboy;
 
 #[derive(Copy, Clone, PartialEq)]
 #[repr(u32)]
@@ -290,4 +291,41 @@ impl From<GB_gbs_info_t> for GBSInfo {
                 .to_string(),
         }
     }
+}
+
+#[derive(Copy, Clone)]
+pub enum RgbEncoding {
+    B8G8R8X8,
+    R8G8B8X8,
+    X8R8G8B8,
+    X8B8G8R8,
+}
+
+#[derive(Default, Copy, Clone)]
+pub struct EnabledEvents {
+    /// Record vblank events.
+    ///
+    /// Note that vblank events will still be recorded even if rendering is disabled.
+    pub vblank: bool,
+
+    /// Record audio samples.
+    ///
+    /// A sample rate must be enabled with [`Gameboy::set_sample_rate`] or [`Gameboy::set_sample_rate_by_clocks`].
+    pub sample: bool,
+
+    /// Record rumble events.
+    ///
+    /// Rumble must be enabled with [`Gameboy::set_rumble_mode`].
+    pub rumble: bool,
+
+    /// Record printer events.
+    ///
+    /// An emulated printer must be connected with [`Gameboy::connect_printer`].
+    pub printer: bool,
+
+    /// Record all memory reads.
+    pub memory_read: bool,
+
+    /// Record all memory writes.
+    pub memory_write: bool,
 }
