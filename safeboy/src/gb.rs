@@ -1,31 +1,33 @@
+pub mod event;
 use std::any::Any;
 use std::ffi::{c_char, c_uint, CStr};
 use std::marker::PhantomPinned;
-use std::panic::UnwindSafe;
-use std::process::abort;
+use std::mem::zeroed;
 use sameboy_sys::*;
+use crate::gb::event::Event;
 use crate::types::*;
+use event::inner::*;
 
 pub struct Gameboy {
     inner: Box<GameboyStateInner>
 }
 
 impl Gameboy {
-    pub fn new(model: Model) -> Self {
+    pub fn new(model: Model, rgb_encoding: RgbEncoding) -> Self {
         unsafe {
             let gb = GB_alloc();
             let mut inner = Box::new(GameboyStateInner {
                 gb,
                 pixel_buffer: Vec::new(),
                 rendering_disabled: false,
-                rgb_encode_callback: default_rgb_encode_callback,
-                apu_sample_callback: default_apu_sample_callback,
-                rumble_callback: default_rumble_callback,
-                vblank_callback: default_vblank_callback,
-                read_memory_callback: default_read_memory_callback,
-                write_memory_callback: default_write_memory_callback,
-                pages: Vec::new(),
                 user_data: None,
+                rgb_encoding,
+                events: Vec::with_capacity(1024),
+                read_memory_callback: |_,_,data| data,
+                write_memory_callback: |_,_,_| true,
+                track_writes: false,
+                track_reads: false,
+                running: false,
                 _phantom_pinned: Default::default()
             });
 
@@ -34,13 +36,21 @@ impl Gameboy {
             GB_set_user_data(gb, inner.as_mut() as *mut GameboyStateInner as *mut _);
 
             // set dummy callbacks in case the user forgets to specify any
-            GB_set_rgb_encode_callback(gb, Some(GameboyStateInner::rgb_encode_callback));
-            GB_apu_set_sample_callback(gb, Some(GameboyStateInner::apu_sample_callback));
-            GB_set_rumble_callback(gb, Some(GameboyStateInner::rumble_callback));
-            GB_set_vblank_callback(gb, Some(GameboyStateInner::vblank_callback));
+            GB_set_rgb_encode_callback(gb, Some(rgb_encode_callback));
+            GB_apu_set_sample_callback(gb, Some(sample_callback));
+            GB_set_rumble_callback(gb, Some(rumble_callback));
+            GB_set_vblank_callback(gb, Some(vblank_callback));
+
+            GB_set_read_memory_callback(gb, Some(read_memory_callback));
+            GB_set_write_memory_callback(gb, Some(write_memory_callback));
 
             Self { inner }
         }
+    }
+
+    /// Iterate through all events thus far.
+    pub fn iter_events<'a>(&'a mut self) -> impl Iterator<Item = Event> + 'a {
+        self.inner.events.drain(..)
     }
 
     /// Get the model to use for the given save state.
@@ -58,38 +68,49 @@ impl Gameboy {
         }
     }
 
-    /// Sets the data which will be passed to all callbacks
+    /// Sets the data which will be passed to callbacks.
     pub fn set_user_data(&mut self, data: Option<Box<dyn Any>>) {
         self.inner.user_data = data
     }
 
-    /// Get the user data, if any
+    /// Get the user data, if any.
     pub fn get_user_data(&mut self) -> Option<&mut dyn Any> {
         self.inner.user_data.as_mut().map(|b| b.as_mut())
     }
 
     /// Set the model to `model` and reset the emulator.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
     pub fn switch_model_and_reset(&mut self, model: Model) {
         unsafe { GB_switch_model_and_reset(self.inner.gb, model as GB_model_t) };
         self.inner.reset_pixel_buffer();
     }
 
     /// Hard reset the emulator.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
     pub fn reset(&mut self) {
+        self.assert_not_running();
         unsafe { GB_reset(self.inner.gb) }
     }
 
     /// Reset the emulator, but retain HRAM, tile data, object memory, palette data, and DMA state.
-    pub fn quick_reset(&mut self) {
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
+    pub fn partial_reset(&mut self) {
+        self.assert_not_running();
         unsafe { GB_quick_reset(self.inner.gb) }
     }
 
+    /// Inverts the GB camera flags.
     pub fn camera_updated(&mut self) {
         unsafe { GB_camera_updated(self.inner.gb) }
-    }
-
-    pub fn clear_joyp_accessed(&mut self) {
-        unsafe { GB_clear_joyp_accessed(self.inner.gb) }
     }
 
     /// Connect an emulated printer.
@@ -98,20 +119,14 @@ impl Gameboy {
     ///
     /// Disable with [disconnect_serial](Self::disconnect_serial).
     pub fn connect_printer(&mut self) {
-        unsafe { GB_connect_printer(self.inner.gb, Some(GameboyStateInner::printer_callback), Some(GameboyStateInner::printer_done_callback)) }
-    }
-
-    /// Get all pages, emptying the queue.
-    pub fn get_pages(&mut self) -> Vec<PrinterPage> {
-        let mut result = Vec::with_capacity(self.inner.pages.len());
-        result.append(&mut self.inner.pages);
-        result
+        unsafe { GB_connect_printer(self.inner.gb, Some(printer_callback), Some(printer_done_callback)) }
     }
 
     // pub fn connect_workboy(&mut self) {
     //     unsafe { GB_connect_workboy(self.inner.gb) }
     // }
 
+    /// Convert R5G5B5 to 32-bit color.
     pub fn convert_rgb15(&self, color: u16, for_border: bool) -> u32 {
         unsafe { GB_convert_rgb15(self.inner.gb, color, for_border) }
     }
@@ -129,47 +144,74 @@ impl Gameboy {
     //     unsafe { GB_draw_tileset(self.inner.gb) }
     // }
 
+    /// Switch the current track.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
     pub fn gbs_switch_track(&mut self, track: u8) {
+        self.assert_not_running();
         unsafe { GB_gbs_switch_track(self.inner.gb, track) }
+    }
+
+    /// Load a GBS from the slice.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
+    pub fn load_gbs_from_slice(&mut self, buffer: &[u8]) -> Result<GBSInfo, &'static str> {
+        self.assert_not_running();
+
+        let mut info: GB_gbs_info_t = unsafe { zeroed() };
+        let success = unsafe { GB_load_gbs_from_buffer(self.inner.gb, buffer.as_ptr(), buffer.len(), &mut info) } == 0;
+
+        if !success {
+            return Err("invalid GBS")
+        }
+
+        Ok(info.into())
     }
 
     // pub fn get_apu_wave_table(&mut self) {
     //     unsafe { GB_get_apu_wave_table(self.inner.gb) }
     // }
 
+    /// Get the current accessory if one is plugged in.
     pub fn get_built_in_accessory(&self) -> Accessory {
-        match unsafe { GB_get_built_in_accessory(self.inner.gb) } {
-            n if n == GB_accessory_t_GB_ACCESSORY_WORKBOY => Accessory::Workboy,
-            n if n == GB_accessory_t_GB_ACCESSORY_PRINTER => Accessory::Printer,
-            n if n == GB_accessory_t_GB_ACCESSORY_NONE => Accessory::None,
-            _ => unreachable!()
-        }
+        unsafe { GB_get_built_in_accessory(self.inner.gb) }.into()
     }
 
+    /// Get the channel amplitude.
     pub fn get_channel_amplitude(&self, channel: AudioChannel) -> u8 {
         unsafe { GB_get_channel_amplitude(self.inner.gb, channel as GB_channel_t) }
     }
 
+    /// Return `true` if a channel edge is triggered.
     pub fn get_channel_edge_triggered(&self, channel: AudioChannel) -> bool {
         unsafe { GB_get_channel_edge_triggered(self.inner.gb, channel as GB_channel_t) }
     }
 
+    /// Get the period of the audio channel.
     pub fn get_channel_period(&mut self, channel: AudioChannel) -> u16 {
         unsafe { GB_get_channel_period(self.inner.gb, channel as GB_channel_t) }
     }
 
+    /// Set the volume for a given audio channel.
     pub fn get_channel_volume(&mut self, channel: AudioChannel) -> u8 {
         unsafe { GB_get_channel_volume(self.inner.gb, channel as GB_channel_t) }
     }
 
+    /// Return `true` if a given audio channel is muted.
     pub fn is_channel_muted(&self, channel: AudioChannel) -> bool {
         unsafe { GB_is_channel_muted(self.inner.gb, channel as GB_channel_t) }
     }
 
+    /// Mute a given audio channel.
     pub fn set_channel_muted(&mut self, channel: AudioChannel, muted: bool) {
         unsafe { GB_set_channel_muted(self.inner.gb, channel as GB_channel_t, muted) }
     }
 
+    /// Get the effective clock rate.
     pub fn get_clock_rate(&self) -> u32 {
         unsafe { GB_get_clock_rate(self.inner.gb) }
     }
@@ -202,31 +244,23 @@ impl Gameboy {
         }
     }
 
+    /// Return `true` if JOYP was accessed.
     pub fn get_joyp_accessed(&self) -> bool {
         unsafe { GB_get_joyp_accessed(self.inner.gb) }
     }
 
+    /// Clear the flag for if JOYP was accessed.
+    pub fn clear_joyp_accessed(&mut self) {
+        unsafe { GB_clear_joyp_accessed(self.inner.gb) }
+    }
+
+    /// Get the currently loaded model.
     pub fn get_model(&self) -> Model {
-        let model = unsafe { GB_get_model(self.inner.gb) } as u32;
-        match model {
-            n if n == Model::DMGB as u32 => Model::DMGB,
-            n if n == Model::SGBNTSC as u32 => Model::SGBNTSC,
-            n if n == Model::SGBPAL as u32 => Model::SGBPAL,
-            n if n == Model::SGBNTSCNoSFC as u32 => Model::SGBNTSCNoSFC,
-            n if n == Model::SGBPALNoSFC as u32 => Model::SGBPALNoSFC,
-            n if n == Model::SGB2 as u32 => Model::SGB2,
-            n if n == Model::SGB2NoSFC as u32 => Model::SGB2NoSFC,
-            n if n == Model::MGB as u32 => Model::MGB,
-            n if n == Model::CGB0 as u32 => Model::CGB0,
-            n if n == Model::CGBA as u32 => Model::CGBA,
-            n if n == Model::CGBB as u32 => Model::CGBB,
-            n if n == Model::CGBC as u32 => Model::CGBC,
-            n if n == Model::CGBD as u32 => Model::CGBD,
-            n if n == Model::CGBE as u32 => Model::CGBE,
-            n if n == Model::AGBA as u32 => Model::AGBA,
-            n if n == Model::GBPA as u32 => Model::GBPA,
-            _ => unreachable!("unknown model {:08X}", model)
-        }
+        let model = unsafe { GB_get_model(self.inner.gb) };
+        let Ok(model) = Model::try_from(model) else {
+            unreachable!("unknown model {model:?}")
+        };
+        model
     }
 
     // pub fn get_oam_info(&mut self) {
@@ -237,10 +271,12 @@ impl Gameboy {
     //     unsafe { GB_get_palette(self.inner.gb) }
     // }
 
+    /// Get player count (relevant for SGB).
     pub fn get_player_count(&mut self) -> u32 {
         unsafe { GB_get_player_count(self.inner.gb) }
     }
 
+    /// Get the current state of the registers.
     pub fn get_registers(&self) -> Registers {
         unsafe {
             let registers = GB_get_registers(self.inner.gb);
@@ -248,10 +284,12 @@ impl Gameboy {
         }
     }
 
+    /// Get the CRC32 of the ROM.
     pub fn get_rom_crc32(&mut self) -> u32 {
         unsafe { GB_get_rom_crc32(self.inner.gb) }
     }
 
+    /// Get the ROM title from the cartridge header.
     pub fn get_rom_title(&mut self) -> String {
         let mut title = [0u8; 17];
         unsafe { GB_get_rom_title(self.inner.gb, &mut title as *mut u8 as *mut c_char) };
@@ -262,26 +300,32 @@ impl Gameboy {
         c_str.to_string_lossy().to_string()
     }
 
+    /// Get the current audio sample rate.
     pub fn get_sample_rate(&self) -> u32 {
         unsafe { GB_get_sample_rate(self.inner.gb) }
     }
 
+    /// Get the height of the screen in pixels.
     pub fn get_screen_height(&self) -> usize {
         self.inner.get_screen_height()
     }
 
+    /// Get the width of the screen in pixels.
     pub fn get_screen_width(&self) -> usize {
         self.inner.get_screen_width()
     }
 
+    /// Get the base clock rate in clocks per second (Hz).
     pub fn get_unmultiplied_clock_rate(&self) -> u32 {
         unsafe { GB_get_unmultiplied_clock_rate(self.inner.gb) }
     }
 
+    /// Get the base frame rate in frames per second.
     pub fn get_usual_frame_rate(&self) -> f64 {
         unsafe { GB_get_usual_frame_rate(self.inner.gb) }
     }
 
+    /// Return `true` if an accelerometer is present.
     pub fn has_accelerometer(&self) -> bool {
         unsafe { GB_has_accelerometer(self.inner.gb) }
     }
@@ -290,51 +334,77 @@ impl Gameboy {
         unsafe { GB_icd_set_joyp(self.inner.gb, value) }
     }
 
+    /// Return `true` if background rendering is disabled.
     pub fn is_background_rendering_disabled(&self) -> bool {
         unsafe { GB_is_background_rendering_disabled(self.inner.gb) }
     }
 
+    /// Return `true` if a Game Boy Color instance.
     pub fn is_cgb(&self) -> bool {
         unsafe { GB_is_cgb(self.inner.gb) }
     }
 
+    /// Return `true` if a Game Boy Color instance running a Game Boy Color game.
     pub fn is_cgb_in_cgb_mode(&self) -> bool {
         unsafe { GB_is_cgb_in_cgb_mode(self.inner.gb) }
     }
 
+    /// Return `true` if SGB with HLE.
     pub fn is_hle_sgb(&self) -> bool {
         unsafe { GB_is_hle_sgb(self.inner.gb) }
     }
 
+    /// Return `true` if object rendering is disabled.
     pub fn is_object_rendering_disabled(&self) -> bool {
         unsafe { GB_is_object_rendering_disabled(self.inner.gb) }
     }
 
+    /// Return `true` if the frame is odd.
     pub fn is_odd_frame(&self) -> bool {
         unsafe { GB_is_odd_frame(self.inner.gb) }
     }
 
+    /// Return `true` if SGB.
     pub fn is_sgb(&self) -> bool {
         unsafe { GB_is_sgb(self.inner.gb) }
     }
 
-    pub fn load_sram_from_buffer(&mut self, buffer: &[u8]) {
+    /// Load SRAM from the slice.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
+    pub fn load_sram_from_slice(&mut self, buffer: &[u8]) {
+        self.assert_not_running();
         unsafe { GB_load_battery_from_buffer(self.inner.gb, buffer.as_ptr(), buffer.len()) }
     }
 
-    pub fn load_boot_rom_from_buffer(&mut self, buffer: &[u8]) {
+    /// Load a boot ROM from the slice.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
+    pub fn load_boot_rom_from_slice(&mut self, buffer: &[u8]) {
+        self.assert_not_running();
         unsafe { GB_load_boot_rom_from_buffer(self.inner.gb, buffer.as_ptr(), buffer.len()) }
     }
 
-    // pub fn load_gbs_from_buffer(&mut self) {
-    //     unsafe { GB_load_gbs_from_buffer(self.inner.gb) }
-    // }
-
-    pub fn load_rom_from_buffer(&mut self, buffer: &[u8]) {
+    /// Load a ROM from the slice.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
+    pub fn load_rom_from_slice(&mut self, buffer: &[u8]) {
+        self.assert_not_running();
         unsafe { GB_load_rom_from_buffer(self.inner.gb, buffer.as_ptr(), buffer.len()) }
     }
 
-    pub fn load_state_from_buffer(&mut self, buffer: &[u8]) -> Result<(), ()> {
+    /// Load a save state from the slice.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
+    pub fn load_state_from_slice(&mut self, buffer: &[u8]) -> Result<(), ()> {
         let result = unsafe { GB_load_state_from_buffer(self.inner.gb, buffer.as_ptr(), buffer.len()) };
         if result != 0 {
             Err(())
@@ -344,16 +414,46 @@ impl Gameboy {
         }
     }
 
+    /// Read memory at the given address.
+    ///
+    /// This may trigger callbacks.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
     pub fn read_memory(&mut self, addr: u16) -> u8 {
+        self.assert_not_running();
         unsafe { GB_read_memory(self.inner.gb, addr) }
     }
 
+    /// Rewind to the previous state on the stack.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
     pub fn rewind_pop(&mut self) -> bool {
+        self.assert_not_running();
         unsafe { GB_rewind_pop(self.inner.gb) }
     }
 
+    /// Clear all rewind states.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
     pub fn rewind_reset(&mut self) {
+        self.assert_not_running();
         unsafe { GB_rewind_reset(self.inner.gb) }
+    }
+
+    /// Set the rewind state buffer length in seconds.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
+    pub fn set_rewind_length(&mut self, seconds: f64) {
+        self.assert_not_running();
+        unsafe { GB_set_rewind_length(self.inner.gb, seconds) }
     }
 
     pub fn rom_supports_alarms(&mut self) -> bool {
@@ -364,71 +464,124 @@ impl Gameboy {
         unsafe { GB_time_to_alarm(self.inner.gb) as u32 }
     }
 
+    /// Return `true` if the emulator is currently running. If so, some functions cannot be called.
+    ///
+    /// This will generally be the case if inside a callback.
+    #[inline(always)]
+    pub fn is_running(&self) -> bool {
+        self.inner.is_running()
+    }
+
     /// Run for a few cycles.
     ///
     /// Returns the number of 8 MiHz cycles that passed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
     pub fn run(&mut self) -> u64 {
-        unsafe { GB_run(self.inner.gb) as u64 }
+        self.assert_not_running();
+        self.inner.running = true;
+        let result = unsafe { GB_run(self.inner.gb) as u64 };
+        self.inner.running = false;
+        result
     }
 
     /// Run for one frame.
     ///
     /// Returns the number of nanoseconds passed since the last frame.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
     pub fn run_frame(&mut self) -> u64 {
-        unsafe { GB_run_frame(self.inner.gb) }
+        self.assert_not_running();
+        self.inner.running = true;
+        let result = unsafe { GB_run_frame(self.inner.gb) };
+        self.inner.running = false;
+        result
     }
 
     /// Read memory at the address.
     ///
     /// NOTE: This will still trigger the read_memory_callback.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
     pub fn safe_read_memory(&mut self, addr: u16) -> u8 {
+        self.assert_not_running();
         unsafe { GB_safe_read_memory(self.inner.gb, addr) }
     }
 
+    /// Get the SRAM size in bytes.
     pub fn get_sram_size(&self) -> usize {
         (unsafe { GB_save_battery_size(self.inner.gb) }) as usize
     }
 
-    pub fn read_sram_to_buffer(&self, data: &mut [u8]) {
+    /// Write SRAM to a slice.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()` or `data.len() != self.get_sram_size()`
+    pub fn read_sram_to_slice(&self, data: &mut [u8]) {
+        self.assert_not_running();
         assert_eq!(data.len(), self.get_sram_size());
         unsafe {
             GB_save_battery_to_buffer(self.inner.gb, data.as_mut_ptr(), data.len());
         }
     }
 
-    pub fn read_sram_to_vec(&self) -> Vec<u8> {
+    /// Read SRAM to a vector.
+    ///
+    /// `vec` will be cleared, with its contents replaced by the contents of the save state.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
+    pub fn read_sram_to_vec(&self, vec: &mut Vec<u8>) {
         let len = self.get_sram_size();
-        let mut data = Vec::with_capacity(len);
+        vec.clear();
+        vec.reserve_exact(len);
         unsafe {
-            data.set_len(len);
+            vec.set_len(len);
         }
-        self.read_sram_to_buffer(&mut data);
-        data
+        self.read_sram_to_slice(vec.as_mut_slice());
     }
 
+    /// Get the size of a save state in bytes.
     pub fn get_save_state_size(&self) -> usize {
         unsafe { GB_get_save_state_size(self.inner.gb) }
     }
 
-    pub fn read_save_state_to_buffer(&self, data: &mut [u8]) {
+    /// Read the save state to a slice.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()` or `data.len() != self.get_save_state_size()`
+    pub fn read_save_state_to_slice(&self, data: &mut [u8]) {
+        self.assert_not_running();
         assert_eq!(data.len(), self.get_save_state_size());
         unsafe {
             GB_save_state_to_buffer(self.inner.gb, data.as_mut_ptr());
         }
     }
 
-    pub fn read_save_state_to_vec(&self) -> Vec<u8> {
+    /// Read the save state to a vector.
+    ///
+    /// `vec` will be cleared, with its contents replaced by the contents of the save state.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
+    pub fn read_save_state_to_vec(&self, vec: &mut Vec<u8>) {
         let len = self.get_save_state_size();
-        let mut data = Vec::with_capacity(len);
+        vec.clear();
+        vec.reserve_exact(len);
         unsafe {
-            data.set_len(len);
+            vec.set_len(len);
         }
-        self.read_save_state_to_buffer(&mut data);
-        data
-    }
-
-    pub fn set_apu_sample_callback(&mut self, callback: fn(callback: Option<&mut dyn Any>, left: i16, right: i16)) {
-        self.inner.apu_sample_callback = callback;
+        self.read_save_state_to_slice(vec.as_mut_slice());
     }
 
     // TODO: CHEATS
@@ -458,10 +611,12 @@ impl Gameboy {
     // }
     //
     // pub fn add_cheat(&mut self) {
+    //     self.assert_not_running();
     //     unsafe { GB_add_cheat(self.inner.gb) }
     // }
     //
     // pub fn update_cheat(&mut self) {
+    //     self.assert_not_running();
     //     unsafe { GB_update_cheat(self.inner.gb) }
     // }
     //
@@ -493,7 +648,15 @@ impl Gameboy {
         unsafe { GB_set_border_mode(self.inner.gb, mode as GB_border_mode_t) }
     }
 
+    /// Set the emulation speed ratio.
+    ///
+    /// For example, 1.0 = 100% speed, 2.0 = 200% speed, etc.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `multiplier <= 0.0`.
     pub fn set_clock_multiplier(&mut self, multiplier: f64) {
+        assert!(multiplier > 0.0);
         unsafe { GB_set_clock_multiplier(self.inner.gb, multiplier) }
     }
 
@@ -552,80 +715,93 @@ impl Gameboy {
         unsafe { GB_set_palette(self.inner.gb, &palette) }
     }
 
+    /// Set whether rendering is disabled.
+    ///
+    /// Note that vblank events will still be recorded in events, but the pixel buffer won't be
+    /// updated. This can be useful for improving performance if a graphical output is not desired.
     pub fn set_rendering_disabled(&mut self, disabled: bool) {
         unsafe { GB_set_rendering_disabled(self.inner.gb, disabled) };
         self.inner.rendering_disabled = disabled;
         self.inner.reset_pixel_buffer();
     }
 
+    /// Get the current pixel buffer.
     pub fn get_pixel_buffer(&self) -> &[u32] {
         self.inner.pixel_buffer.as_slice()
     }
 
-    pub fn set_rewind_length(&mut self, seconds: f64) {
-        unsafe { GB_set_rewind_length(self.inner.gb, seconds) }
-    }
-
+    /// Set the real-time clock mode.
     pub fn set_rtc_mode(&mut self, mode: RTCMode) {
         unsafe { GB_set_rtc_mode(self.inner.gb, mode as GB_rtc_mode_t) }
     }
 
+    /// Set the real-time multiplier.
     pub fn set_rtc_multiplier(&mut self, multiplier: f64) {
         unsafe { GB_set_rtc_multiplier(self.inner.gb, multiplier) }
     }
 
+    /// Set the rumble mode.
+    ///
+    /// Rumble events will be sent to Events if enabled.
     pub fn set_rumble_mode(&mut self, mode: Rumble) {
         unsafe { GB_set_rumble_mode(self.inner.gb, mode as GB_rumble_mode_t) }
     }
 
-    pub fn set_rumble_callback(&mut self, callback: fn(callback: Option<&mut dyn Any>, rumble_amplitude: f64)) {
-        self.inner.rumble_callback = callback
-    }
-
+    /// Set the audio sample rate.
+    ///
+    /// Audio events will be sent to Events if non-zero.
     pub fn set_sample_rate(&mut self, sample_rate: u32) {
         unsafe { GB_set_sample_rate(self.inner.gb, sample_rate as c_uint) }
     }
 
+    /// Set the audio sample rate based on clock rate.
+    ///
+    /// Audio events will be sent to Events if non-zero.
     pub fn set_sample_rate_by_clocks(&mut self, clocks_per_sample: f64) {
         unsafe { GB_set_sample_rate_by_clocks(self.inner.gb, clocks_per_sample) }
     }
 
+    /// Set turbo mode.
+    ///
+    /// If enabled, the emulator will run at an uncapped frame rate.
     pub fn set_turbo_mode(&mut self, turbo: bool, no_frame_skip: bool) {
         unsafe { GB_set_turbo_mode(self.inner.gb, turbo, no_frame_skip) }
     }
 
+    /// Write the memory to the given address.
+    ///
+    /// This may have side effects.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.is_running()`
     pub fn write_memory(&mut self, addr: u16, value: u8) {
+        self.assert_not_running();
         unsafe { GB_write_memory(self.inner.gb, addr, value) }
     }
 
-    pub fn set_rgb_encode_callback(&mut self, callback: Option<fn(callback: Option<&mut dyn Any>, red: u8, green: u8, blue: u8) -> u32>) {
-        self.inner.rgb_encode_callback = callback.unwrap_or(default_rgb_encode_callback);
+    /// Track memory reads in events.
+    pub fn track_memory_reads_in_events(&mut self, tracked: bool) {
+        self.inner.track_reads = tracked;
     }
 
-    pub fn set_vblank_callback(&mut self, callback: Option<fn(callback: Option<&mut dyn Any>, vblank_type: VBlankType)>) {
-        self.inner.vblank_callback = callback.unwrap_or(default_vblank_callback);
+    /// Track memory writes in events.
+    pub fn track_memory_writes_in_events(&mut self, tracked: bool) {
+        self.inner.track_writes = tracked;
     }
 
-    pub fn set_read_memory_callback(&mut self, callback: Option<fn(callback: Option<&mut dyn Any>, addr: u16, data: u8) -> u8>) {
-        if let Some(callback) = callback {
-            self.inner.read_memory_callback = callback;
-            unsafe { GB_set_read_memory_callback(self.inner.gb, Some(GameboyStateInner::read_memory_callback)); }
-        }
-        else {
-            self.inner.read_memory_callback = default_read_memory_callback;
-            unsafe { GB_set_read_memory_callback(self.inner.gb, None); }
-        }
+    /// Run the callback when memory is being read.
+    ///
+    /// Unlike with `track_memory_reads`, you can intercept the read and even change it by returning a different byte.
+    pub fn set_memory_read_callback(&mut self, callback: fn(user_data: Option<&mut dyn Any>, address: u16, data: u8) -> u8) {
+        self.inner.read_memory_callback = callback;
     }
 
-    pub fn set_write_memory_callback(&mut self, callback: Option<fn(callback: Option<&mut dyn Any>, addr: u16, data: u8) -> bool>) {
-        if let Some(callback) = callback {
-            self.inner.write_memory_callback = callback;
-            unsafe { GB_set_write_memory_callback(self.inner.gb, Some(GameboyStateInner::write_memory_callback)); }
-        }
-        else {
-            self.inner.write_memory_callback = default_write_memory_callback;
-            unsafe { GB_set_write_memory_callback(self.inner.gb, None); }
-        }
+    /// Run the callback when memory is being written.
+    ///
+    /// Unlike with `track_memory_writes`, you can intercept the write and even prevent it by returning `false`.
+    pub fn set_memory_write_callback(&mut self, callback: fn(gameboy: Option<&mut dyn Any>, address: u16, data: u8) -> bool) {
+        self.inner.write_memory_callback = callback;
     }
 
     // TODO: A few callbacks
@@ -769,20 +945,32 @@ impl Gameboy {
     // pub fn set_async_input_callback(&mut self) {
     //     unsafe { GB_set_async_input_callback(self.inner.gb) } // note that this is for the debugger, not the joypad
     // }
+
+    #[inline(always)]
+    fn assert_not_running(&self) {
+        self.inner.assert_not_running();
+    }
+}
+
+pub enum RgbEncoding {
+    B8G8R8X8,
+    R8G8B8X8,
+    X8R8G8B8,
+    X8B8G8R8,
 }
 
 struct GameboyStateInner {
     gb: *mut GB_gameboy_t,
     pixel_buffer: Vec<u32>,
     rendering_disabled: bool,
-    rgb_encode_callback: fn(user_data: Option<&mut dyn Any>, red: u8, green: u8, blue: u8) -> u32,
-    apu_sample_callback: fn(user_data: Option<&mut dyn Any>, left: i16, right: i16),
-    vblank_callback: fn(user_data: Option<&mut dyn Any>, vblank_type: VBlankType),
-    rumble_callback: fn(user_data: Option<&mut dyn Any>, rumble_amplitude: f64),
-    read_memory_callback: fn(user_data: Option<&mut dyn Any>, addr: u16, data: u8) -> u8,
-    write_memory_callback: fn(user_data: Option<&mut dyn Any>, addr: u16, data: u8) -> bool,
-    pages: Vec<PrinterPage>,
     user_data: Option<Box<dyn Any>>,
+    rgb_encoding: RgbEncoding,
+    events: Vec<Event>,
+    track_reads: bool,
+    read_memory_callback: fn(user_data: Option<&mut dyn Any>, address: u16, data: u8) -> u8,
+    track_writes: bool,
+    write_memory_callback: fn(user_data: Option<&mut dyn Any>, address: u16, data: u8) -> bool,
+    running: bool,
     _phantom_pinned: PhantomPinned,
 }
 
@@ -808,126 +996,29 @@ impl GameboyStateInner {
         unsafe { GB_get_screen_height(self.gb) as usize }
     }
 
-    extern "C" fn read_memory_callback(gb: *mut GB_gameboy_t, addr: u16, data: u8) -> u8 {
-        Self::catch_panic_and_die("read", || {
-            let this = Self::resolve_self(gb);
-            (this.read_memory_callback)(this.get_user_data(), addr, data)
-        })
-    }
-
-    extern "C" fn write_memory_callback(gb: *mut GB_gameboy_t, addr: u16, data: u8) -> bool {
-        Self::catch_panic_and_die("read", || {
-            let this = Self::resolve_self(gb);
-            (this.write_memory_callback)(this.get_user_data(), addr, data)
-        })
-    }
-
-    extern "C" fn vblank_callback(gb: *mut GB_gameboy_t, vblank_type: GB_vblank_type_t) {
-        Self::catch_panic_and_die("vblank", || {
-            let this = Self::resolve_self(gb);
-            (this.vblank_callback)(this.get_user_data(), vblank_type.into())
-        })
-    }
-
-    extern "C" fn rumble_callback(gb: *mut GB_gameboy_t, rumble_amplitude: f64) {
-        Self::catch_panic_and_die("rumble", || {
-            let this = Self::resolve_self(gb);
-            (this.rumble_callback)(this.get_user_data(), rumble_amplitude)
-        })
-    }
-
-    extern "C" fn apu_sample_callback(gb: *mut GB_gameboy_t, sample: *mut GB_sample_t) {
-        Self::catch_panic_and_die("apu_sample", || {
-            let this = Self::resolve_self(gb);
-            let sample = unsafe { *sample };
-            (this.apu_sample_callback)(this.get_user_data(), sample.left, sample.right)
-        })
-    }
-
-    extern "C" fn rgb_encode_callback(gb: *mut GB_gameboy_t, r: u8, g: u8, b: u8) -> u32 {
-        Self::catch_panic_and_die("rgb_encode", || {
-            let this = Self::resolve_self(gb);
-            (this.rgb_encode_callback)(this.get_user_data(), r, g, b)
-        })
-    }
-
     fn get_user_data(&mut self) -> Option<&mut dyn Any> {
         self.user_data.as_mut().map(|m| m.as_mut())
     }
 
-    /// Catch an unwinding panic, and abort if this occurs.
-    ///
-    /// We need to catch unwinds inside of callbacks, since it is undefined behavior to unwind
-    /// across FFI bounds.
-    ///
-    /// The callback could be anything, after all!
-    fn catch_panic_and_die<T, F: FnOnce() -> T + UnwindSafe>(name: &'static str, action: F) -> T {
-        std::panic::catch_unwind(action).unwrap_or_else(|_| { eprintln!("{name} callback panicked"); abort() })
+    #[inline(always)]
+    fn is_running(&self) -> bool {
+        self.running
     }
 
-    extern "C" fn printer_callback(
-        gb: *mut GB_gameboy_t,
-        image: *mut u32,
-        height: u8,
-        top_margin: u8,
-        bottom_margin: u8,
-        exposure: u8
-    ) {
-        let this = Self::resolve_self(gb);
-
-        let height = height as usize;
-        let top_margin = top_margin as usize;
-        let bottom_margin = bottom_margin as usize;
-        let total_height = height + top_margin + bottom_margin;
-        let width = 160;
-
-        let mut data = vec![0xFFFFFFFF; total_height * width];
-        let input_data = unsafe { std::slice::from_raw_parts_mut(image, height * width) };
-        let output_start = width * top_margin;
-        data[output_start..output_start + height * width].copy_from_slice(input_data);
-
-        let page = PrinterPage {
-            width,
-            top_margin,
-            data,
-            height,
-            bottom_margin,
-            exposure
-        };
-
-        this.pages.push(page);
-    }
-
-    extern "C" fn printer_done_callback(_: *mut GB_gameboy_t) {}
-
-    fn resolve_self(gb: *mut GB_gameboy_t) -> &'static mut Self {
-        // SAFETY: Should be OK as we set the user data to this instance, and we use a pin.
-        unsafe { (GB_get_user_data(gb) as *mut Self).as_mut().unwrap() }
+    #[inline(always)]
+    fn assert_not_running(&self) {
+        assert!(!self.is_running(), "A disallowed method was called while the Gameboy instance was running.");
     }
 }
 
-impl Drop for Gameboy {
+impl Drop for GameboyStateInner {
     fn drop(&mut self) {
+        self.assert_not_running();
         unsafe {
-            GB_dealloc(self.inner.gb)
+            GB_dealloc(self.gb)
         }
     }
 }
-
-
-fn default_rgb_encode_callback(_: Option<&mut dyn Any>, r: u8, g: u8, b: u8) -> u32 {
-    0xFF000000 | (( r as u32 ) << 16) | (( g as u32 ) << 8) | ( b as u32 )
-}
-
-fn default_apu_sample_callback(_: Option<&mut dyn Any>, _: i16, _: i16) {}
-
-fn default_rumble_callback(_: Option<&mut dyn Any>, _: f64) {}
-
-fn default_vblank_callback(_: Option<&mut dyn Any>, _: VBlankType) {}
-
-fn default_read_memory_callback(_: Option<&mut dyn Any>, _: u16, data: u8) -> u8 { data }
-
-fn default_write_memory_callback(_: Option<&mut dyn Any>, _: u16, _: u8) -> bool { true }
 
 unsafe impl Send for GameboyStateInner {}
 unsafe impl Sync for GameboyStateInner {}

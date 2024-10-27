@@ -1,3 +1,5 @@
+use std::ffi::{c_char, CStr};
+use std::mem::transmute;
 use sameboy_sys::*;
 
 #[derive(Copy, Clone, PartialEq)]
@@ -30,22 +32,22 @@ impl TryFrom<u32> for Model {
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
-            n if n == Self::DMGB as u32 => { Ok(Self::DMGB) },
-            n if n == Self::SGBNTSC as u32 => { Ok(Self::SGBNTSC) },
-            n if n == Self::SGBPAL as u32 => { Ok(Self::SGBPAL) },
-            n if n == Self::SGBNTSCNoSFC as u32 => { Ok(Self::SGBNTSCNoSFC) },
-            n if n == Self::SGBPALNoSFC as u32 => { Ok(Self::SGBPALNoSFC) },
-            n if n == Self::SGB2 as u32 => { Ok(Self::SGB2) },
-            n if n == Self::SGB2NoSFC as u32 => { Ok(Self::SGB2NoSFC) },
-            n if n == Self::MGB as u32 => { Ok(Self::MGB) },
-            n if n == Self::CGB0 as u32 => { Ok(Self::CGB0) },
-            n if n == Self::CGBA as u32 => { Ok(Self::CGBA) },
-            n if n == Self::CGBB as u32 => { Ok(Self::CGBB) },
-            n if n == Self::CGBC as u32 => { Ok(Self::CGBC) },
-            n if n == Self::CGBD as u32 => { Ok(Self::CGBD) },
-            n if n == Self::CGBE as u32 => { Ok(Self::CGBE) },
-            n if n == Self::AGBA as u32 => { Ok(Self::AGBA) },
-            n if n == Self::GBPA as u32 => { Ok(Self::GBPA) },
+            sameboy_sys::GB_model_t_GB_MODEL_DMG_B => { Ok(Self::DMGB) },
+            sameboy_sys::GB_model_t_GB_MODEL_SGB_NTSC => { Ok(Self::SGBNTSC) },
+            sameboy_sys::GB_model_t_GB_MODEL_SGB_PAL => { Ok(Self::SGBPAL) },
+            sameboy_sys::GB_model_t_GB_MODEL_SGB_NTSC_NO_SFC => { Ok(Self::SGBNTSCNoSFC) },
+            sameboy_sys::GB_model_t_GB_MODEL_SGB_PAL_NO_SFC => { Ok(Self::SGBPALNoSFC) },
+            sameboy_sys::GB_model_t_GB_MODEL_SGB2 => { Ok(Self::SGB2) },
+            sameboy_sys::GB_model_t_GB_MODEL_SGB2_NO_SFC => { Ok(Self::SGB2NoSFC) },
+            sameboy_sys::GB_model_t_GB_MODEL_MGB => { Ok(Self::MGB) },
+            sameboy_sys::GB_model_t_GB_MODEL_CGB_0 => { Ok(Self::CGB0) },
+            sameboy_sys::GB_model_t_GB_MODEL_CGB_A => { Ok(Self::CGBA) },
+            sameboy_sys::GB_model_t_GB_MODEL_CGB_B => { Ok(Self::CGBB) },
+            sameboy_sys::GB_model_t_GB_MODEL_CGB_C => { Ok(Self::CGBC) },
+            sameboy_sys::GB_model_t_GB_MODEL_CGB_D => { Ok(Self::CGBD) },
+            sameboy_sys::GB_model_t_GB_MODEL_CGB_E => { Ok(Self::CGBE) },
+            sameboy_sys::GB_model_t_GB_MODEL_AGB_A => { Ok(Self::AGBA) },
+            sameboy_sys::GB_model_t_GB_MODEL_GBP_A => { Ok(Self::GBPA) },
             _ => Err(())
         }
     }
@@ -153,6 +155,16 @@ pub enum Accessory {
     Printer = GB_accessory_t_GB_ACCESSORY_PRINTER as u32,
     Workboy = GB_accessory_t_GB_ACCESSORY_WORKBOY as u32,
 }
+impl From<GB_accessory_t> for Accessory {
+    fn from(value: GB_accessory_t) -> Self {
+        match value {
+            sameboy_sys::GB_accessory_t_GB_ACCESSORY_WORKBOY => Accessory::Workboy,
+            sameboy_sys::GB_accessory_t_GB_ACCESSORY_PRINTER => Accessory::Printer,
+            sameboy_sys::GB_accessory_t_GB_ACCESSORY_NONE => Accessory::None,
+            _ => unreachable!()
+        }
+    }
+}
 
 impl From<GB_registers_t> for Registers {
     fn from(value: GB_registers_t) -> Self {
@@ -218,10 +230,10 @@ pub enum VBlankType {
 impl From<GB_vblank_type_t> for VBlankType {
     fn from(value: GB_vblank_type_t) -> Self {
         match value {
-            n if n == VBlankType::NormalFrame as GB_vblank_type_t => VBlankType::NormalFrame,
-            n if n == VBlankType::LCDOff as GB_vblank_type_t => VBlankType::LCDOff,
-            n if n == VBlankType::Artificial as GB_vblank_type_t => VBlankType::Artificial,
-            n if n == VBlankType::Repeat as GB_vblank_type_t => VBlankType::Repeat,
+            sameboy_sys::GB_vblank_type_t_GB_VBLANK_TYPE_NORMAL_FRAME => VBlankType::NormalFrame,
+            sameboy_sys::GB_vblank_type_t_GB_VBLANK_TYPE_LCD_OFF => VBlankType::LCDOff,
+            sameboy_sys::GB_vblank_type_t_GB_VBLANK_TYPE_ARTIFICIAL => VBlankType::Artificial,
+            sameboy_sys::GB_vblank_type_t_GB_VBLANK_TYPE_REPEAT => VBlankType::Repeat,
             _ => unreachable!()
         }
     }
@@ -247,5 +259,35 @@ impl From<PaletteColor> for GB_palette_t_GB_color_s {
     fn from(value: PaletteColor) -> Self {
         let PaletteColor { r, g, b } = value;
         Self { r, g, b }
+    }
+}
+
+#[derive(Clone)]
+pub struct GBSInfo {
+    pub track_count: u8,
+    pub first_track: u8,
+    pub title: String,
+    pub author: String,
+    pub copyright: String,
+}
+
+impl From<GB_gbs_info_t> for GBSInfo {
+    fn from(value: GB_gbs_info_t) -> Self {
+        Self {
+            track_count: 0,
+            first_track: 0,
+            title: CStr::from_bytes_until_nul(&unsafe { transmute::<[c_char; 33], [u8; 33]>(value.title) })
+                .expect("bad title")
+                .to_string_lossy()
+                .to_string(),
+            author: CStr::from_bytes_until_nul(&unsafe { transmute::<[c_char; 33], [u8; 33]>(value.author) })
+                .expect("bad author")
+                .to_string_lossy()
+                .to_string(),
+            copyright: CStr::from_bytes_until_nul(&unsafe { transmute::<[c_char; 33], [u8; 33]>(value.copyright) })
+                .expect("bad copyright")
+                .to_string_lossy()
+                .to_string(),
+        }
     }
 }
