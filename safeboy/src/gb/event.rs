@@ -10,6 +10,7 @@ pub enum Event {
 }
 
 pub(crate) mod inner {
+    use alloc::vec;
     use sameboy_sys::{GB_gameboy_t, GB_get_user_data, GB_sample_t, GB_vblank_type_t};
     use crate::gb::{GameboyStateInner, RgbEncoding};
     use crate::gb::event::Event;
@@ -65,7 +66,7 @@ pub(crate) mod inner {
         let width = 160;
 
         let mut data = vec![0xFFFFFFFF; total_height * width];
-        let input_data = unsafe { std::slice::from_raw_parts_mut(image, height * width) };
+        let input_data = unsafe { core::slice::from_raw_parts_mut(image, height * width) };
         let output_start = width * top_margin;
         data[output_start..output_start + height * width].copy_from_slice(input_data);
 

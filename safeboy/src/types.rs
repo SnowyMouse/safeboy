@@ -1,6 +1,8 @@
-use std::any::Any;
-use std::ffi::{c_char, CStr};
-use std::mem::transmute;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::any::Any;
+use core::ffi::*;
+use core::mem::transmute;
 use sameboy_sys::*;
 
 #[derive(Copy, Clone, PartialEq)]

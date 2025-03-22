@@ -1,8 +1,12 @@
 pub mod event;
-use std::any::Any;
-use std::ffi::{c_char, c_uint, CStr};
-use std::marker::PhantomPinned;
-use std::mem::zeroed;
+
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use core::any::Any;
+use core::mem::zeroed;
+use alloc::string::{String, ToString};
+use core::ffi::*;
+use core::marker::PhantomPinned;
 use sameboy_sys::*;
 use crate::gb::event::Event;
 use crate::types::*;
@@ -255,7 +259,7 @@ impl Gameboy {
         }
         else {
             // SAFETY: GB_get_direct_access's size value corresponds to the pointer it returns
-            (unsafe { std::slice::from_raw_parts_mut(access as *mut u8, size) }, bank)
+            (unsafe { core::slice::from_raw_parts_mut(access as *mut u8, size) }, bank)
         }
     }
 
@@ -725,7 +729,7 @@ impl Gameboy {
 
     pub fn set_palette(&mut self, palette: Palette) {
         let palette = GB_palette_t {
-            colors: std::array::from_fn(|f| palette[f].into())
+            colors: core::array::from_fn(|f| palette[f].into())
         };
         unsafe { GB_set_palette(self.inner.gb, &palette) }
     }
@@ -976,7 +980,7 @@ impl GameboyStateInner {
         self.pixel_buffer.clear();
 
         if self.rendering_disabled {
-            unsafe { GB_set_pixels_output(self.gb, std::ptr::null_mut()); }
+            unsafe { GB_set_pixels_output(self.gb, core::ptr::null_mut()); }
         }
         else {
             let required_width = self.get_screen_width() * self.get_screen_height();
