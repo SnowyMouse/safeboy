@@ -1,10 +1,22 @@
-//! Safe Rust bindings for the SameBoy emulator
+//! # safeboy
+//! 
+//! Safe Rust bindings for the SameBoy emulator, an accurate Game Boy Color emulator written in C
+//! by Lior Halphon.
 
 #![no_std]
+#![warn(missing_docs)]
+
+const _: () = {
+    assert!(size_of::<usize>() >= size_of::<u32>());
+};
+
 extern crate alloc;
 
-pub mod types;
-mod gb;
+pub mod rgb_encoder;
 
-pub use gb::Gameboy;
-pub use gb::event::Event;
+mod instance;
+
+pub use instance::*;
+
+mod model;
+pub use model::*;

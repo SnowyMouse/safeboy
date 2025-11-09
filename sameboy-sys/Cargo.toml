@@ -1,12 +1,32 @@
 [package]
 name = "sameboy-sys"
-version = "0.1.2"
-edition = "2021"
-readme = "../README.md"
-rust-version = "1.78.0"
-license = "GPL-3.0-only"
-description = "Unsafe bindings for SameBoy, a free and accurate Game Boy emulator"
+description = "Rust bindings for SameBoy"
+version = { workspace = true }
+license = { workspace = true }
+readme = "README.md"
+edition = { workspace = true }
+repository = { workspace = true }
+include = [
+    "src",
+    "build.rs",
+    "Cargo.toml",
+    "README.md",
+
+    # include SameBoy code
+    "SameBoy/Core",
+    "SameBoy/Windows",
+    "SameBoy/version.mk",
+
+    # also include SameBoy's license and readme
+    "SameBoy/LICENSE",
+    "SameBoy/README.md",
+]
+
+[features]
+default = []
+debugger = []
 
 [build-dependencies]
-bindgen = "0.69.4"
-cmake = "0.1.50"
+cc = "1.2.45"
+bindgen = "0.72.1"
+regex = "1.12.2"

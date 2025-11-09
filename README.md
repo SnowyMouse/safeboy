@@ -1,13 +1,36 @@
-# SafeBoy (TODO)
+# safeboy
 
-These are safe bindings for SameBoy, a free and accurate Game Boy emulator.
+This crate provides a safe Rust wrapper for [SameBoy], an accurate Game Boy
+emulator written in C.
 
-This is intended to provide safe bindings without any significant performance impact.
+[SameBoy]: https://github.com/LIJI32/SameBoy
 
-## License (bindings)
+## What does it do?
 
-These bindings are available under version 3 of the GNU General Public License.
+- Provides a thread-safe abstraction of SameBoy's interface
+  - Most thread safety is statically provided by Rust's type system and borrow
+    checker.
+- Provides an ergonomic callback API using Rust traits and dynamic dispatch
+- Provides a number of comfort types to help you use the crate, like Rust
+  wrappers over the C types
 
-## License (SameBoy)
+## Requirements
 
-SameBoy is owned and copyright by Lior Halphon, available under the Expat (MIT) license.
+In order to use this crate, you need the following:
+
+- `alloc` must be available (`std` is not required)
+- `usize` must be at least 32 bits in width
+
+Additionally, SameBoy must be able to compile for your target. Note that as it
+is building just the emulator core, itself, most of its requirements do not
+apply (e.g. SDL). You really just need a C compiler like GCC or Clang.
+
+For Windows, you also do not need Visual Studio installed. You can use the
+`i686-pc-windows-gnu` and `x86_64-pc-windows-gnu` targets to build this crate,
+and cross-compiling should generally work.
+
+### Boot ROMs
+
+Since only the emulator core is being compiled, none of the SameBoy boot ROMs
+will be provided. If you want those, you will need to compile those separately
+using `rgbds`.

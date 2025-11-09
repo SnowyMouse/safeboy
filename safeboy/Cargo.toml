@@ -1,12 +1,15 @@
 [package]
 name = "safeboy"
-version = "0.2.1"
-edition = "2021"
-readme = "../README.md"
-rust-version = "1.78.0"
-license = "GPL-3.0-only"
-description = "Safe bindings for SameBoy, a free and accurate Game Boy emulator"
-repository = "https://github.com/SnowyMouse/safeboy"
+description = "Safe Rust wrapper for SameBoy"
+version = { workspace = true }
+license = { workspace = true }
+readme = { workspace = true }
+edition = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
-sameboy-sys = { path = "../sameboy-sys", version = "0.1.2" }
+sameboy-sys = { workspace = true }
+
+[features]
+default = []
+debugger = ["sameboy-sys/debugger"]
