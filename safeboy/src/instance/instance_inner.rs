@@ -282,7 +282,10 @@ pub trait RunnableInstanceFunctions {
     fn load_rom(&mut self, rom: &[u8]);
 
     /// Get direct access to a given region.
-    fn direct_access(&'_ mut self, access: DirectAccessRegion) -> DirectAccessData<'_>;
+    fn direct_access(&'_ self, access: DirectAccessRegion) -> DirectAccessData<'_>;
+
+    /// Get direct access to a given region.
+    fn direct_access_mut(&'_ mut self, access: DirectAccessRegion) -> DirectAccessDataMut<'_>;
 
     /// Returns true if the current emulator is a Game Boy Color.
     fn is_cgb(&self) -> bool;
@@ -485,8 +488,13 @@ impl RunnableInstanceFunctions for Gameboy {
     }
 
     #[inline]
-    fn direct_access(&'_ mut self, access: DirectAccessRegion) -> DirectAccessData<'_> {
-        self.do_with_inner_mut(|inner| unsafe { transmute::<DirectAccessData, DirectAccessData>(inner.direct_access(access)) })
+    fn direct_access(&'_ self, access: DirectAccessRegion) -> DirectAccessData<'_> {
+        self.inner.direct_access(access)
+    }
+
+    #[inline]
+    fn direct_access_mut(&'_ mut self, access: DirectAccessRegion) -> DirectAccessDataMut<'_> {
+        self.do_with_inner_mut(|inner| unsafe { transmute::<DirectAccessDataMut, DirectAccessDataMut>(inner.direct_access_mut(access)) })
     }
 
     #[inline]
@@ -605,13 +613,13 @@ impl RunnableInstanceFunctions for Gameboy {
     }
 
     #[inline]
-    fn rewind_reset(&mut self) {
-        self.do_with_inner_mut(|inner| inner.rewind_reset())
+    fn set_rewind_length(&mut self, seconds: f64) {
+        self.do_with_inner_mut(|inner| inner.set_rewind_length(seconds))
     }
 
     #[inline]
-    fn set_rewind_length(&mut self, seconds: f64) {
-        self.do_with_inner_mut(|inner| inner.set_rewind_length(seconds))
+    fn rewind_reset(&mut self) {
+        self.do_with_inner_mut(|inner| inner.rewind_reset())
     }
 
     #[inline]
@@ -723,15 +731,15 @@ impl RunnableInstanceFunctions for RunningGameboy {
         self.fixup_rom_title();
     }
 
-    fn direct_access(&'_ mut self, access: DirectAccessRegion) -> DirectAccessData<'_> {
-        let mut bank = 0u16;
-        let mut size = 0usize;
-        let data = unsafe {
-            let ptr = GB_get_direct_access(self.gb, access as _, &mut size, &mut bank) as *mut u8;
-            core::slice::from_raw_parts_mut(ptr, size)
-        };
-        DirectAccessData {
-            data, bank
+    fn direct_access(&'_ self, access: DirectAccessRegion) -> DirectAccessData<'_> {
+        unsafe {
+            direct_access(self.gb, access).into()
+        }
+    }
+
+    fn direct_access_mut(&'_ mut self, access: DirectAccessRegion) -> DirectAccessDataMut<'_> {
+        unsafe {
+            direct_access(self.gb, access)
         }
     }
 
@@ -1040,10 +1048,28 @@ pub struct PixelBufferRead<'a> {
 /// A region of memory in a Game Boy.
 pub struct DirectAccessData<'a> {
     /// Pointer to the data.
+    pub data: &'a [u8],
+
+    /// Current bank, if any.
+    pub bank: u16
+}
+
+/// A region of memory in a Game Boy.
+pub struct DirectAccessDataMut<'a> {
+    /// Pointer to the data.
     pub data: &'a mut [u8],
 
     /// Current bank, if any.
     pub bank: u16
+}
+
+impl<'a> From<DirectAccessDataMut<'a>> for DirectAccessData<'a> {
+    fn from(value: DirectAccessDataMut<'a>) -> Self {
+        Self {
+            data: value.data,
+            bank: value.bank
+        }
+    }
 }
 
 /// Specifies a monochrome palette for setting/getting from the emulator.
@@ -1108,4 +1134,16 @@ pub enum TurboMode {
     ///
     /// The vblank callback will be called on vblank.
     Enabled
+}
+
+unsafe fn direct_access(gb: *mut GB_gameboy_t, access: DirectAccessRegion) -> DirectAccessDataMut<'static> {
+    let mut bank = 0u16;
+    let mut size = 0usize;
+    let data = unsafe {
+        let ptr = GB_get_direct_access(gb, access as _, &mut size, &mut bank) as *mut u8;
+        core::slice::from_raw_parts_mut(ptr, size)
+    };
+    DirectAccessDataMut {
+        data, bank
+    }
 }
