@@ -36,7 +36,7 @@ impl RunningGameboy {
         // SAFETY: This is safe and is provided as an example
         let sameboy = unsafe { GB_init(GB_alloc(), model as GB_model_t) };
 
-        RunningGameboy {
+        let mut instance = RunningGameboy {
             gb: sameboy,
             callbacks: Box::new(NullCallbacks),
             pixel_buffer: Vec::new(),
@@ -46,7 +46,9 @@ impl RunningGameboy {
             is_running: false,
             rom_title: String::new(),
             _unpin: PhantomPinned
-        }
+        };
+        instance.reset_pixel_buffer();
+        instance
     }
 
     pub(crate) fn reset_pixel_buffer(&mut self) {
