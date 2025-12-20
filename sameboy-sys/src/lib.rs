@@ -11,5 +11,5 @@
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-/// SameBoy's version
+/// The SameBoy core's version
 pub const GB_VERSION: &str = env!("GB_VERSION");

@@ -10,6 +10,8 @@ const _: () = {
     assert!(size_of::<usize>() >= size_of::<u32>());
 };
 
+pub use sameboy_sys::GB_VERSION;
+
 extern crate alloc;
 
 pub mod rgb_encoder;
