@@ -26,8 +26,9 @@ include = [
 [features]
 default = []
 debugger = []
+bindgen = ["dep:bindgen"]
 
 [build-dependencies]
 cc = "1.2.45"
-bindgen = "0.72.1"
+bindgen = { version = "0.72.1", optional = true }
 regex = "1.12.2"

@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use regex::Regex;
 
 const DEBUGGER_FILES: &[&str] = &[
@@ -78,6 +78,14 @@ fn main() {
     build_system.define("GB_VERSION", version_formatted.as_str());
     build_system.warnings(false); // suppress warnings; we can't do anything about them
     build_system.compile("sameboy");
+
+    #[cfg(feature = "bindgen")]
+    generate_bindings(core_path, disable_debugger, disable_cheat_search)
+}
+
+#[cfg(feature = "bindgen")]
+fn generate_bindings(core_path: &Path, disable_debugger: bool, disable_cheat_search: bool) {
+    use std::path::PathBuf;
 
     // If you encounter issues with stuff like time.h not being found, you might need
     // to use BINDGEN_EXTRA_CLANG_ARGS='--sysroot <path/to/sysroot>'

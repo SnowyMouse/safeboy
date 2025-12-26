@@ -9,7 +9,11 @@
 #![allow(unnecessary_transmutes)]
 #![allow(unsafe_op_in_unsafe_fn)]
 
+#[cfg(feature = "bindgen")]
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+
+#[cfg(not(feature = "bindgen"))]
+include!("bindings_pregenerated.rs");
 
 /// The SameBoy core's version
 pub const GB_VERSION: &str = env!("GB_VERSION");
